@@ -5,3 +5,5 @@ authors = ["Isaac Woods"]
 edition = "2024"
 
 [dependencies]
+embla = { path = "../embla" }
+mycelium-bitfield = "0.1.5"

@@ -2,4 +2,5 @@
 
 #![no_std]
 
+pub mod bit_ops;
 pub mod sync;

@@ -5,3 +5,4 @@ authors = ["Isaac Woods"]
 edition = "2024"
 
 [dependencies]
+hal = { path = "hal" }

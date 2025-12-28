@@ -5,6 +5,7 @@ authors = ["Isaac Woods"]
 edition = "2024"
 
 [dependencies]
-uefi = "0.35.0"
+uefi = { version = "0.35.0", features = ["alloc", "global_allocator"] }
 embla = { path = "../embla/" }
 hal = { path = "../hal/" }
+mycelium-bitfield = "0.1.5"

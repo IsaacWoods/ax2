@@ -27,6 +27,10 @@ version = "0.1.0"
 [[package]]
 name = "hal"
 version = "0.1.0"
+dependencies = [
+ "embla",
+ "mycelium-bitfield",
+]
 
 [[package]]
 name = "loader"
@@ -34,6 +38,7 @@ version = "0.1.0"
 dependencies = [
  "embla",
  "hal",
+ "mycelium-bitfield",
  "uefi",
 ]
 
@@ -42,6 +47,12 @@ name = "log"
 version = "0.4.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
+
+[[package]]
+name = "mycelium-bitfield"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24e0cc5e2c585acbd15c5ce911dff71e1f4d5313f43345873311c4f5efd741cc"
 
 [[package]]
 name = "proc-macro2"
