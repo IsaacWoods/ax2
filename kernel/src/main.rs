@@ -1,37 +1,31 @@
 #![no_std]
 #![no_main]
 
-use hal::io::IoPort;
+mod trace;
+
+use core::alloc::GlobalAlloc;
+use tracing::info;
 
 #[unsafe(no_mangle)]
 pub fn kentry() -> ! {
-    unsafe {
-        let debug_port = IoPort::new(0xe9);
-        debug_port.write(b'H');
-        debug_port.write(b'e');
-        debug_port.write(b'l');
-        debug_port.write(b'l');
-        debug_port.write(b'o');
-        debug_port.write(b' ');
-        debug_port.write(b'f');
-        debug_port.write(b'r');
-        debug_port.write(b'o');
-        debug_port.write(b'm');
-        debug_port.write(b' ');
-        debug_port.write(b'K');
-        debug_port.write(b'e');
-        debug_port.write(b'r');
-        debug_port.write(b'n');
-        debug_port.write(b'e');
-        debug_port.write(b'l');
-    }
+    tracing::dispatch::set_global_default(tracing::Dispatch::from_static(&trace::SUBSCRIBER))
+        .unwrap();
+    info!("Hello, World!");
 
     loop {}
 }
 
-#[cfg(not(test))]
-#[panic_handler]
-fn panic_handler(info: &core::panic::PanicInfo) -> ! {
-    // TODO
-    loop {}
+#[global_allocator]
+static ALLOC: FakeAlloc = FakeAlloc;
+
+struct FakeAlloc;
+
+unsafe impl GlobalAlloc for FakeAlloc {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        todo!()
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        todo!()
+    }
 }

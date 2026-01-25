@@ -122,6 +122,7 @@ fn main() -> Status {
         _reserved0: [0; 3],
     });
 
+    println!("Entering kernel...\n");
     trampoline(
         boot_info_kernel_addr,
         kernel_page_table.p4,
