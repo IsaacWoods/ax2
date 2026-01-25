@@ -1,6 +1,5 @@
 pub const MAGIC: u32 = 0xf0cacc1a;
 
-// TODO: loader version, kernel config, user task configs(?)
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Header {
@@ -11,11 +10,19 @@ pub struct Header {
     /// Length of the memory map, in entries.
     pub mem_map_length: u16,
 
+    /// The start of the frame holding the loader trampoline. Included so it can be unmapped.
+    pub loader_trampoline_addr: u64,
+
     /// The first available **virtual** address, after the kernel and boot info.
     pub kernel_free_start: u64,
 
     /// The physical address of the RSDP, if found. If not, this will be `0`.
     pub rsdp_address: u64,
+
+    /// Offset of the cmdline into the string table.
+    pub cmdline_offset: u16,
+    /// Length of the cmdline, in bytes.
+    pub cmdline_len: u16,
 
     pub loaded_images_offset: u16,
     pub num_loaded_images: u16,
@@ -25,7 +32,7 @@ pub struct Header {
 
     /// Offset from the start of this header to the `VideoModeInfo` descriptor, if one is present. Otherwise `0`.
     pub video_mode_offset: u16,
-    pub _reserved0: [u16; 3],
+    pub _reserved0: [u16; 1], // Align to 8 bytes
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]

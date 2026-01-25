@@ -14,6 +14,7 @@ use alloc::{
     vec::Vec,
 };
 use core::{arch::naked_asm, mem, num::NonZero, ptr, ptr::NonNull};
+use embla::cmdline::Cmdline;
 use hal::{
     bootinfo,
     mem::{MemFlags, PAddr, PageTable, PageTableAllocator, VAddr},
@@ -61,6 +62,12 @@ fn main() -> Status {
 
     let mut loader_fs =
         uefi::fs::FileSystem::new(boot::get_image_file_system(boot::image_handle()).unwrap());
+    let cmdline_str = loader_fs
+        .read_to_string(Path::new(&CString16::try_from("cmdline").unwrap()))
+        .unwrap();
+    let cmdline_str = cmdline_str.trim();
+    let cmdline = Cmdline::new(&cmdline_str);
+
     let mut kernel_page_table = PageTable::new(&BSPageTableAllocator, VAddr::new(0x0));
     let (kernel, mut next_available_address) = load_kernel(&mut loader_fs, &mut kernel_page_table);
 
@@ -68,7 +75,9 @@ fn main() -> Status {
         unsafe { BootInfoArea::new(next_available_address, &mut kernel_page_table) };
     let boot_info_kernel_addr = next_available_address;
     next_available_address += BootInfoArea::MAX_SIZE;
+
     let mut string_table = BootInfoStringTable::new();
+    let cmdline_offset = string_table.add_string(&cmdline_str);
 
     // TODO: load requested extra kernel stuff, images, etc.
     // TODO: create GOP framebuffer
@@ -80,10 +89,12 @@ fn main() -> Status {
      * Identity map the trampoline.
      */
     let trampoline_ptr = trampoline as *const extern "C" fn(VAddr, PAddr, VAddr, VAddr) -> !;
+    let trampoline_frame_addr =
+        PAddr::new(trampoline_ptr as usize).align_down(PageTable::PAGE_SIZE_4KIB);
     kernel_page_table
         .map_one(
-            VAddr::new(trampoline_ptr as usize).align_down(PageTable::PAGE_SIZE_4KIB),
-            PAddr::new(trampoline_ptr as usize).align_down(PageTable::PAGE_SIZE_4KIB),
+            VAddr::new(usize::from(trampoline_frame_addr)),
+            trampoline_frame_addr,
             PageTable::PAGE_SIZE_4KIB,
             MemFlags {
                 executable: true,
@@ -110,16 +121,19 @@ fn main() -> Status {
         magic: bootinfo::MAGIC,
         mem_map_offset,
         mem_map_length,
+        loader_trampoline_addr: usize::from(trampoline_frame_addr) as u64,
         kernel_free_start: usize::from(next_available_address) as u64,
         rsdp_address: find_rsdp()
             .map(|addr| usize::from(addr) as u64)
             .unwrap_or(0),
+        cmdline_offset,
+        cmdline_len: cmdline_str.len() as u16,
         loaded_images_offset: 0,
         num_loaded_images: 0,
         string_table_offset,
         string_table_length,
         video_mode_offset: 0,
-        _reserved0: [0; 3],
+        _reserved0: [0; 1],
     });
 
     println!("Entering kernel...\n");

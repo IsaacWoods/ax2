@@ -1,10 +1,11 @@
 use core::{
-    fmt,
-    fmt::Write,
+    fmt::{self, Write},
+    str::FromStr,
     sync::atomic::{AtomicU64, Ordering},
 };
-use embla::sync::Spinlock;
+use embla::{cmdline::Cmdline, sync::Spinlock};
 use hal::io::IoPort;
+use tracing::warn;
 use tracing_core::{Event, Level, span};
 
 pub static SUBSCRIBER: Subscriber = Subscriber::new();
@@ -22,8 +23,17 @@ impl Subscriber {
         }
     }
 
-    pub fn set_log_level(&self, log_level: Level) {
-        self.debug.lock().min_level = log_level;
+    pub fn configure(&self, cmdline: &Cmdline) {
+        if let Some(Some(level)) = cmdline.get("trace.level") {
+            if let Ok(level) = Level::from_str(level) {
+                self.debug.lock().min_level = level
+            } else {
+                warn!(
+                    "Invalid option for `trace.level` ({:?}). Valid options are `error`, `warn`, `info`, `debug`, or `trace`",
+                    level
+                );
+            }
+        }
     }
 }
 

@@ -18,6 +18,7 @@ dependencies = [
 name = "kernel"
 version = "0.1.0"
 dependencies = [
+ "embla",
  "hal",
  "tracing",
  "tracing-core",
