@@ -9,6 +9,7 @@ mod elf;
 
 use crate::elf::{Elf, ProgramHeaderFlags};
 use alloc::{
+    slice,
     string::{String, ToString},
     vec::Vec,
 };
@@ -21,7 +22,7 @@ use uefi::{
     CString16,
     boot::{AllocateType, MemoryType},
     fs::Path,
-    mem::memory_map::MemoryMap,
+    mem::memory_map::{MemoryMap, MemoryMapMut, MemoryMapOwned},
     prelude::*,
 };
 
@@ -92,20 +93,18 @@ fn main() -> Status {
         )
         .unwrap();
 
+    // TODO: construct physical mapping - query the memory map here to find the correct physical
+    // address to map to - this shouldn't change
+
     /*
      * Exit boot services. From this point, we must be careful not to allocate.
      * TODO: we could have a second page-table allocator that mutates this memory map? We might be
      * able to avoid this tho by working out the max physical address from a memory map *before*
      * exiting BSs, as that shouldn't change?
      */
-    let memory_map = unsafe { boot::exit_boot_services(None) };
-
-    for entry in memory_map.entries() {
-        // println!("{:?}", entry);
-        // TODO: process memory map
-    }
-
-    let (mem_map_offset, mem_map_length) = (0, 0);
+    let mut memory_map = unsafe { boot::exit_boot_services(None) };
+    memory_map.sort();
+    let (mem_map_offset, mem_map_length) = process_memory_map(&mut boot_info_area, memory_map);
 
     boot_info_area.write_header(bootinfo::Header {
         magic: bootinfo::MAGIC,
@@ -375,4 +374,159 @@ fn find_rsdp() -> Option<PAddr> {
             .or_else(|| entries.iter().find(|entry| matches!(entry.guid, ACPI_GUID)))
             .map(|entry| PAddr::new(entry.address as usize))
     })
+}
+
+/// Takes the final UEFI memory map and processes it into a form suitable to pass to the kernel.
+/// Returns the `(offset, length)` of the emitted memory map in the `BootInfoArea`.
+fn process_memory_map(boot_info_area: &mut BootInfoArea, memory_map: MemoryMapOwned) -> (u16, u16) {
+    let offset = boot_info_area.offset();
+    let mut length = 0;
+
+    println!("UEFI memory map:");
+    for entry in memory_map.entries() {
+        let ty_str = match entry.ty {
+            MemoryType::RESERVED => "RESERVED",
+            MemoryType::LOADER_CODE => "LOADER_CODE",
+            MemoryType::LOADER_DATA => "LOADER_DATA",
+            MemoryType::BOOT_SERVICES_CODE => "BOOT_SERVICES_CODE",
+            MemoryType::BOOT_SERVICES_DATA => "BOOT_SERVICES_DATA",
+            MemoryType::RUNTIME_SERVICES_CODE => "RUNTIME_SERVICES_CODE",
+            MemoryType::RUNTIME_SERVICES_DATA => "RUNTIME_SERVICES_DATA",
+            MemoryType::CONVENTIONAL => "CONVENTIONAL",
+            MemoryType::UNUSABLE => "UNUSABLE",
+            MemoryType::ACPI_RECLAIM => "ACPI_RECLAIM",
+            MemoryType::ACPI_NON_VOLATILE => "ACPI_NON_VOLATILE",
+            MemoryType::MMIO => "MMIO",
+            MemoryType::MMIO_PORT_SPACE => "MMIO_PORT_SPACE",
+            MemoryType::PAL_CODE => "PAL_CODE",
+            MemoryType::PERSISTENT_MEMORY => "PERSISTENT_MEMORY",
+            MemoryType::UNACCEPTED => "UNACCEPTED",
+            _ => "????",
+        };
+        println!(
+            "    {:<30} {:016x} .. {:016x}",
+            ty_str,
+            entry.phys_start,
+            entry.phys_start + entry.page_count * PageTable::PAGE_SIZE_4KIB as u64
+        );
+
+        let typ = match entry.ty {
+            MemoryType::RESERVED => bootinfo::MemoryType::Reserved,
+
+            MemoryType::CONVENTIONAL
+            | MemoryType::LOADER_CODE
+            | MemoryType::LOADER_DATA
+            | MemoryType::BOOT_SERVICES_CODE
+            | MemoryType::BOOT_SERVICES_DATA
+            | MemoryType::PERSISTENT_MEMORY => bootinfo::MemoryType::Usable,
+
+            MemoryType::RUNTIME_SERVICES_CODE | MemoryType::RUNTIME_SERVICES_DATA => {
+                bootinfo::MemoryType::UefiRuntimeServices
+            }
+
+            MemoryType::ACPI_RECLAIM => bootinfo::MemoryType::AcpiReclaimable,
+            MemoryType::ACPI_NON_VOLATILE => bootinfo::MemoryType::AcpiNvs,
+
+            _ => bootinfo::MemoryType::Reserved,
+        };
+
+        unsafe {
+            boot_info_area.write(bootinfo::MemoryEntry {
+                base: entry.phys_start,
+                length: entry.page_count * PageTable::PAGE_SIZE_4KIB as u64,
+                typ,
+                _reserved: 0,
+            });
+        }
+        length += 1;
+    }
+
+    let memory_map = unsafe {
+        slice::from_raw_parts_mut(
+            boot_info_area.boot_info_ptr.byte_add(offset as usize) as *mut bootinfo::MemoryEntry,
+            length,
+        )
+    };
+
+    const SCRATCH: bootinfo::MemoryEntry = bootinfo::MemoryEntry {
+        base: 0,
+        length: 0,
+        typ: bootinfo::MemoryType::Scratch,
+        _reserved: 0,
+    };
+
+    // Remove zero-length entries
+    for i in 0..length {
+        if memory_map[i].length == 0 {
+            memory_map[i] = SCRATCH;
+            continue;
+        }
+    }
+
+    // Check for overlapping regions (never trust UEFI firmwares)
+    for i in 0..(length - 1) {
+        let entry = memory_map[i];
+        if (entry.base + entry.length) > memory_map[i + 1].base {
+            println!(
+                "Error: memory map contains overlapping regions! Entry of type {:?} at {:#x}..{:#x} overlaps entry at {:#x}",
+                entry.typ,
+                entry.base,
+                entry.base + entry.length,
+                memory_map[i + 1].base
+            );
+            // TODO: if one region is reserved/runtime services/etc, we could trim the overlapping region out of the other entry to make it safer?
+        }
+    }
+
+    /*
+     * Merge contiguous entries of the same time. This is common as many of the entries in the UEFI
+     * map can be collapsed into a single usable entry.
+     * XXX: We merge into the *second* entry of the memory map, so that the new entry will be
+     * considered for further merging on the next iteration. If the next entry is a scratch entry,
+     * we swap them, to allow the same.
+     */
+    for i in 0..(length - 1) {
+        let a = memory_map[i];
+        let b = memory_map[i + 1];
+
+        if b.typ == bootinfo::MemoryType::Scratch {
+            memory_map[i + i] = a;
+            memory_map[i] = SCRATCH;
+            continue;
+        }
+
+        if a.typ == b.typ && (a.base + a.length) == b.base {
+            memory_map[i + 1] = bootinfo::MemoryEntry {
+                base: a.base,
+                length: a.length + b.length,
+                typ: a.typ,
+                _reserved: 0,
+            };
+            memory_map[i] = SCRATCH;
+        }
+    }
+
+    /*
+     * TODO: it may be useful for the kernel to know where things we've allocated are (to e.g.
+     * deallocate the memory used by a loaded module that is no longer needed). At the
+     * moment these allocations will be `Reserved` memory. We could keep a separate list and
+     * extract them from the memory map to mark them separately - at worst, this would split a
+     * `Reserved` entry into 3 new entries, requiring 2 free `Scratch` entries and a re-sort by
+     * address at the end (if necessary).
+     */
+
+    println!("Final memory map:");
+    for entry in memory_map {
+        if entry.typ == bootinfo::MemoryType::Scratch {
+            continue;
+        }
+        println!(
+            "    {:<30?} {:016x} .. {:016x}",
+            entry.typ,
+            entry.base,
+            entry.base + entry.length
+        );
+    }
+
+    (offset, length as u16)
 }

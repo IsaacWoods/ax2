@@ -55,8 +55,9 @@ pub enum MemoryType {
     /// Memory used by a framebuffer.
     Framebuffer,
 
-    /// Scratch entries are placed at the end of the memory map, and facilitate memory map manipulation by the kernel for the purposes of early memory allocation.
-    /// They should be ignored for all other purposes.
+    /// Scratch entries are used to facilitate in-place manipulation of the memory map by the
+    /// loader, and can be used by the kernel for early memory allocation. They should otherwise be
+    /// ignored.
     Scratch,
 }
 
