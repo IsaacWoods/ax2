@@ -1,6 +1,10 @@
 #![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 #![feature(str_from_raw_parts)]
+
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 mod bootinfo;
 mod trace;
