@@ -104,14 +104,37 @@ fn main() -> Status {
         )
         .unwrap();
 
-    // TODO: construct physical mapping - query the memory map here to find the correct physical
-    // address to map to - this shouldn't change
+    /*
+     * Map the higher-half physical map. In theory, we should be able to just map all usable RAM +
+     * memory used by ACPI, but we currently don't track our memory usage well enough to do this
+     * (e.g. page tables are not tracked and so are not mapped). For now, we just map the first
+     * 4GiB.
+     * TODO: track loader allocations and do this better.
+     */
+    println!(
+        "Constructing HHDM from 0x0..{:#x} at {:#x}..{:#x}",
+        hal::mem::gib(4),
+        hal::mem::kernel_map::PHYSICAL_MAPPING_BASE,
+        hal::mem::kernel_map::PHYSICAL_MAPPING_BASE + hal::mem::gib(4)
+    );
+    for i in 0..4 {
+        let addr = i * hal::mem::gib(1);
+        kernel_page_table
+            .map(
+                hal::mem::kernel_map::PHYSICAL_MAPPING_BASE + addr,
+                PAddr::new(addr),
+                PageTable::PAGE_SIZE_1GIB,
+                MemFlags {
+                    writable: true,
+                    ..Default::default()
+                },
+                &BSPageTableAllocator,
+            )
+            .unwrap();
+    }
 
     /*
      * Exit boot services. From this point, we must be careful not to allocate.
-     * TODO: we could have a second page-table allocator that mutates this memory map? We might be
-     * able to avoid this tho by working out the max physical address from a memory map *before*
-     * exiting BSs, as that shouldn't change?
      */
     let mut memory_map = unsafe { boot::exit_boot_services(None) };
     memory_map.sort();
@@ -249,7 +272,7 @@ impl PageTableAllocator for BSPageTableAllocator {
     fn alloc(&self) -> PAddr {
         let paddr = boot::allocate_pages(AllocateType::AnyPages, MemoryType::RESERVED, 1).unwrap();
         unsafe {
-            ptr::write_bytes(paddr.as_ptr(), 0, 0x1000);
+            ptr::write_bytes(paddr.as_ptr(), 0, PageTable::PAGE_SIZE_4KIB);
         }
         PAddr::new(paddr.as_ptr() as usize)
     }
