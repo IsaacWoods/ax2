@@ -7,12 +7,12 @@ extern crate alloc;
 extern crate std;
 
 mod bootinfo;
+mod heap;
 mod trace;
 
 use crate::bootinfo::BootInfo;
-use core::alloc::GlobalAlloc;
 use embla::cmdline::Cmdline;
-use hal::mem::VAddr;
+use hal::mem::{PageTable, VAddr};
 use tracing::{info, trace};
 
 #[unsafe(no_mangle)]
@@ -21,7 +21,7 @@ pub fn kentry(boot_info_ptr: VAddr) -> ! {
         .unwrap();
     info!("Hello, World!");
 
-    let bootinfo = BootInfo::new(boot_info_ptr);
+    let mut bootinfo = BootInfo::new(boot_info_ptr);
     info!("Kernel cmdline: {:?}", bootinfo.cmdline());
     let cmdline = Cmdline::new(bootinfo.cmdline());
     trace::SUBSCRIBER.configure(&cmdline);
@@ -30,20 +30,9 @@ pub fn kentry(boot_info_ptr: VAddr) -> ! {
         trace!("Memmap entry: {:?}", entry);
     }
 
+    let mut kernel_page_table =
+        unsafe { PageTable::current(hal::mem::kernel_map::PHYSICAL_MAPPING_BASE) };
+    heap::bootstrap(&mut kernel_page_table, &mut bootinfo);
+
     loop {}
-}
-
-#[global_allocator]
-static ALLOC: FakeAlloc = FakeAlloc;
-
-struct FakeAlloc;
-
-unsafe impl GlobalAlloc for FakeAlloc {
-    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        todo!()
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-        todo!()
-    }
 }

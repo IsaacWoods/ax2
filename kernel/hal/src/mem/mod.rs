@@ -3,6 +3,7 @@ pub mod addr;
 pub use addr::{PAddr, VAddr};
 
 use core::{fmt, ops};
+use embla::bit_ops::BitOps;
 
 /// AX/2 utilises 4-level paging on all x86_64 systems. This means the higher-half starts at
 /// `0xffff_8000_0000_0000`, with the first half (64 TiB) dedicated to a direct mapping of the
@@ -72,10 +73,23 @@ impl PageTable {
     pub const PAGE_SIZE_2MIB: Bytes = mib(2);
     pub const PAGE_SIZE_1GIB: Bytes = gib(1);
 
+    /// Create a new set of page tables.
     pub fn new(allocator: &impl PageTableAllocator, virtual_mapping_base: VAddr) -> PageTable {
         let p4 = allocator.alloc();
         PageTable {
             p4,
+            virtual_mapping_base,
+        }
+    }
+
+    /// Create a `PageTable` from the **currently installed** set of tables. The caller must
+    /// ensure only one `PageTable` instance can be used to modify a set of page tables.
+    pub unsafe fn current(virtual_mapping_base: VAddr) -> PageTable {
+        let mut cr3 = crate::cpu::Cr3::read();
+        cr3.set_bits(0..12, 0);
+
+        PageTable {
+            p4: PAddr::new(cr3 as usize),
             virtual_mapping_base,
         }
     }
