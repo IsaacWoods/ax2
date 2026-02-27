@@ -54,6 +54,14 @@ impl BootInfo {
         }
     }
 
+    pub fn rsdp_addr(&self) -> Option<u64> {
+        let header = unsafe { *self.base };
+        match header.rsdp_address {
+            0 => None,
+            addr => Some(addr),
+        }
+    }
+
     pub fn read_string(&self, offset: u16, len: u16) -> &'_ str {
         assert!(
             offset as usize + len as usize <= self.string_table_len,

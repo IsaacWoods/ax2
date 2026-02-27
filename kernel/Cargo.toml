@@ -9,3 +9,4 @@ embla = { path = "embla" }
 hal = { path = "hal" }
 tracing-core = { git = "https://github.com/tokio-rs/tracing", branch = "v0.2.x", default-features = false }
 tracing = { git = "https://github.com/tokio-rs/tracing", branch = "v0.2.x", default-features = false }
+acpi = "6.1.0"

@@ -8,12 +8,13 @@ extern crate std;
 
 mod bootinfo;
 mod heap;
+mod kacpi;
 mod trace;
 
 use crate::bootinfo::BootInfo;
 use embla::cmdline::Cmdline;
 use hal::mem::{PageTable, VAddr};
-use tracing::{info, trace};
+use tracing::info;
 
 #[unsafe(no_mangle)]
 pub fn kentry(boot_info_ptr: VAddr) -> ! {
@@ -21,18 +22,16 @@ pub fn kentry(boot_info_ptr: VAddr) -> ! {
         .unwrap();
     info!("Hello, World!");
 
-    let mut bootinfo = BootInfo::new(boot_info_ptr);
-    info!("Kernel cmdline: {:?}", bootinfo.cmdline());
-    let cmdline = Cmdline::new(bootinfo.cmdline());
+    let mut boot_info = BootInfo::new(boot_info_ptr);
+    info!("Kernel cmdline: {:?}", boot_info.cmdline());
+    let cmdline = Cmdline::new(boot_info.cmdline());
     trace::SUBSCRIBER.configure(&cmdline);
-
-    for entry in bootinfo.memory_map() {
-        trace!("Memmap entry: {:?}", entry);
-    }
 
     let mut kernel_page_table =
         unsafe { PageTable::current(hal::mem::kernel_map::PHYSICAL_MAPPING_BASE) };
-    heap::bootstrap(&mut kernel_page_table, &mut bootinfo);
+    heap::bootstrap(&mut kernel_page_table, &mut boot_info);
+
+    let acpi_tables = kacpi::find_tables(&boot_info);
 
     loop {}
 }
